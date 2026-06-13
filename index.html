@@ -224,6 +224,7 @@ DB curl 4xF 30s burnout<br>
         <button class="type-chip" data-type="Chest">Chest 💥</button>
         <button class="type-chip" data-type="Back">Back 🔙</button>
         <button class="type-chip" data-type="Arms">Arms 💪</button>
+        <button class="type-chip" data-type="Core">Core 🔥</button>
         <button class="type-chip" data-type="Full Body">Full Body ⚡</button>
         <button class="type-chip" data-type="Cardio">Cardio 🏃</button>
         <button class="type-chip athletic" data-type="Athletic Movement">Athletic Movement 🏃‍♂️⚡</button>
@@ -770,32 +771,14 @@ var selectedTypes = [];
 document.querySelectorAll('.type-chip').forEach(function(chip){
   chip.addEventListener('click',function(){
     var type = chip.dataset.type;
-    if(type === 'Athletic Movement'){
-      // Athletic movement is exclusive
-      var isActive = chip.classList.contains('active');
-      document.querySelectorAll('.type-chip').forEach(function(c){ c.classList.remove('active'); });
-      selectedTypes = [];
-      if(!isActive){
-        chip.classList.add('active');
-        selectedTypes = ['Athletic Movement'];
-        document.getElementById('athleticSportPicker').style.display = 'block';
-      } else {
-        document.getElementById('athleticSportPicker').style.display = 'none';
-      }
+    if(chip.classList.contains('active')){
+      chip.classList.remove('active');
+      selectedTypes = selectedTypes.filter(function(t){ return t !== type; });
+      if(type === 'Athletic Movement') document.getElementById('athleticSportPicker').style.display = 'none';
     } else {
-      // Remove athletic if selecting regular
-      var athChip = document.querySelector('.type-chip.athletic');
-      if(athChip) athChip.classList.remove('active');
-      document.getElementById('athleticSportPicker').style.display = 'none';
-      selectedTypes = selectedTypes.filter(function(t){ return t !== 'Athletic Movement'; });
-
-      if(chip.classList.contains('active')){
-        chip.classList.remove('active');
-        selectedTypes = selectedTypes.filter(function(t){ return t !== type; });
-      } else {
-        chip.classList.add('active');
-        if(selectedTypes.indexOf(type) === -1) selectedTypes.push(type);
-      }
+      chip.classList.add('active');
+      if(selectedTypes.indexOf(type) === -1) selectedTypes.push(type);
+      if(type === 'Athletic Movement') document.getElementById('athleticSportPicker').style.display = 'block';
     }
     renderGenWarning();
   });
@@ -817,6 +800,7 @@ function getMusclesForType(type){
     'Chest':['chest','triceps'],
     'Back':['lats','traps','biceps'],
     'Arms':['biceps','triceps'],
+    'Core':['abs'],
     'Full Body':['chest','lats','quads','shoulders','hamstrings'],
     'Cardio':[],
     'Athletic Movement':['quads','hamstrings','glutes','calves','shoulders','abs']
@@ -853,124 +837,224 @@ function generateWorkout(types){
   copyWrap.style.display = 'none';
   textEl.innerHTML = '<div class="ai-loading"><span class="spinner">⚙️</span>Building your workout...</div>';
 
-  var isAthletic = types.indexOf('Athletic Movement') !== -1;
-  var isMulti = types.length > 1 && !isAthletic;
-
-  // Get selected sports for athletic day
-  var selectedSports = [];
-  if(isAthletic){
-    document.querySelectorAll('.sport-chip.active').forEach(function(s){ selectedSports.push(s.dataset.sport); });
-    if(!selectedSports.length) selectedSports = ['Lacrosse','Basketball','Tennis','Golf'];
-  }
-
-  // Build exercise history context
-  var exHistory = {};
-  workouts.filter(function(w){return !w.rest&&!w.cardio;}).forEach(function(w){
-    w.exercises.forEach(function(e){
-      var k = e.name.toLowerCase();
-      if(!exHistory[k]) exHistory[k] = {name:e.name, weights:[], sets:[], reps:[], lastDate:''};
-      if(e.weight>0) exHistory[k].weights.push(e.weight);
-      if(e.sets>0) exHistory[k].sets.push(e.sets);
-      if(e.reps>0) exHistory[k].reps.push(e.reps);
-      if(w.date>exHistory[k].lastDate) exHistory[k].lastDate=w.date;
-    });
-  });
-
-  var allTargetMuscles = [];
-  types.forEach(function(t){ getMusclesForType(t).forEach(function(m){ if(allTargetMuscles.indexOf(m)===-1) allTargetMuscles.push(m); }); });
-
-  var typeExercises = Object.keys(exHistory).filter(function(k){
-    return getMuscles(exHistory[k].name).some(function(m){ return allTargetMuscles.indexOf(m)!==-1; });
-  });
-
-  var historyContext = typeExercises.slice(0,20).map(function(k){
-    var h = exHistory[k];
-    var avgW = h.weights.length ? Math.round(h.weights.reduce(function(a,b){return a+b;},0)/h.weights.length) : 0;
-    var lastW = h.weights.length ? h.weights[h.weights.length-1] : 0;
-    var avgS = h.sets.length ? Math.round(h.sets.reduce(function(a,b){return a+b;},0)/h.sets.length) : 4;
-    var avgR = h.reps.length ? Math.round(h.reps.reduce(function(a,b){return a+b;},0)/h.reps.length) : 8;
-    return h.name+': last='+lastW+'lbs, avg='+avgW+'lbs, typical='+avgS+'x'+avgR;
-  }).join('\n');
-
-  var warnings = get48hrWarnings(allTargetMuscles);
-  var warnCtx = warnings.length ? 'NOTE: Trained '+warnings.map(function(w){return w.muscle;}).join(', ')+' within 48hrs — keep volume moderate.\n' : '';
-  var extraNotes = document.getElementById('genNotes').value.trim();
-  var today = new Date().toLocaleDateString('en-US',{month:'numeric',day:'numeric'});
-
-  var prompt = '';
-
-  if(isAthletic){
-    prompt = 'You are an athletic performance trainer generating an Athletic Movement workout for DJD.\n\n'+
-      'SPORT FOCUS: '+selectedSports.join(', ')+'\n\n'+
-      'ATHLETIC MOVEMENT DAY FOCUSES ON:\n'+
-      '- Explosive power: box jumps, broad jumps, medicine ball throws, jump squats\n'+
-      '- Rotational power: landmine rotations, cable rotations, med ball rotational throws (key for lacrosse/tennis/golf)\n'+
-      '- Lateral speed & agility: lateral bounds, shuffle patterns, lateral band walks, 5-10-5 drill descriptions\n'+
-      '- Hip mobility & stability: hip 90/90, hip flexor stretches, single leg work, band clamshells\n'+
-      '- Deceleration & change of direction: deceleration lunges, reactive step drills\n'+
-      '- Carry-over exercises: farmers carries, single arm carries, pallof press, anti-rotation work\n'+
-      '- Core explosiveness: ab wheel, cable woodchops, hollow holds, dead bugs\n\n'+
-      'RULES:\n'+
-      '1. Output 6-8 movements focused on athleticism not pure strength\n'+
-      '2. Include sets/reps in the same format as example\n'+
-      '3. Mix explosive, mobility, and strength-based athletic movements\n'+
-      '4. No heavy barbell work — this is a movement quality day\n'+
-      (warnCtx?'5. '+warnCtx:'')+
-      '\nEXAMPLE FORMAT:\n'+
-      today+'\n'+
-      'Box jumps 4x5\n'+
-      'Landmine rotations 3x10e\n'+
-      'Lateral bounds 3x8e\n'+
-      'Pallof press 3x12e\n'+
-      'Single leg RDL 3x8e\n'+
-      'Cable woodchop 3x12e\n'+
-      'Farmers carry 3x40yds\n\n'+
-      (extraNotes?'USER NOTES: '+extraNotes+'\n\n':'')+
-      'Generate the Athletic Movement workout now. Output ONLY the workout in exact format. No commentary.';
-  } else {
-    var typeLabel = types.join(' + ');
-    var supersetNote = isMulti ? 'Structure as supersets — pair exercises from different muscle groups (e.g. A1/A2, B1/B2 format in the notes, but keep the logging format clean).\n' : '';
-    prompt = 'You are a personal trainer generating a '+typeLabel+' workout for DJD.\n\n'+
-      'RULES:\n'+
-      '1. Use exercises from their history where possible\n'+
-      '2. Output EXACTLY in their logging format\n'+
-      '3. Progress weights slightly from last session (add 2.5-5lbs where appropriate)\n'+
-      '4. Include 6-8 exercises total\n'+
-      (isMulti?'5. '+supersetNote:'5. 4 sets per exercise typically\n')+
-      (warnCtx?'6. '+warnCtx:'')+
-      '\nEXAMPLE FORMAT:\n'+
-      today+'\n'+
-      'Cable face pulls 4x12 62.5\n'+
-      'SA cable rows 4x8 65\n'+
-      'Pull-up ladder 10,8,6,6,6\n'+
-      'DB chest supported row 4x6 57.5\n\n'+
-      'USER EXERCISE HISTORY:\n'+historyContext+
-      (extraNotes?'\n\nUSER NOTES: '+extraNotes:'')+
-      '\n\nGenerate the '+typeLabel+' workout now. Output ONLY the workout in exact format. No commentary.';
-  }
-
-  fetch('https://api.anthropic.com/v1/messages',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages:[{role:'user',content:prompt}]})
-  }).then(function(r){return r.json();}).then(function(data){
-    var txt = data.content && data.content[0] ? data.content[0].text : 'Could not generate workout. Try again.';
-    textEl.textContent = txt;
+  setTimeout(function(){
+    var result = buildWorkout(types);
+    textEl.textContent = result;
     copyWrap.style.display = 'flex';
     copyWrap.style.flexDirection = 'column';
     document.getElementById('genCopyBtn').onclick = function(){
-      navigator.clipboard.writeText(txt).then(function(){ toast('Copied! 📋'); });
+      navigator.clipboard.writeText(result).then(function(){ toast('Copied! 📋'); });
     };
     document.getElementById('genImportBtn').onclick = function(){
-      var parsed = parseLog(txt);
+      var parsed = parseLog(result);
       if(parsed.length>0){
         parsed.forEach(function(w){ workouts.push(w); }); save(workouts);
         toast('Workout imported! 💪'); renderHome();
       } else { toast('Could not auto-import — paste it manually'); }
     };
-  }).catch(function(){
-    textEl.textContent = 'Error connecting to AI. Check your connection and try again.';
+  }, 600);
+}
+
+function buildWorkout(types){
+  var isAthletic = types.indexOf('Athletic Movement') !== -1;
+  var otherTypes = types.filter(function(t){ return t !== 'Athletic Movement'; });
+  var isMulti = otherTypes.length > 1;
+  var hasMixed = isAthletic && otherTypes.length > 0;
+  var today = new Date().toLocaleDateString('en-US',{month:'numeric',day:'numeric'});
+
+  // Build exercise history lookup
+  var exHistory = {};
+  workouts.filter(function(w){return !w.rest&&!w.cardio;}).forEach(function(w){
+    w.exercises.forEach(function(e){
+      var k = e.name.toLowerCase();
+      if(!exHistory[k]){
+        exHistory[k] = {name:e.name, weights:[], sets:[], reps:[], count:0};
+      }
+      if(e.weight>0) exHistory[k].weights.push(e.weight);
+      if(e.sets>0) exHistory[k].sets.push(e.sets);
+      if(e.reps>0) exHistory[k].reps.push(e.reps);
+      exHistory[k].count++;
+    });
   });
+
+  function getLast(arr){ return arr.length ? arr[arr.length-1] : 0; }
+  function getAvg(arr){ return arr.length ? arr.reduce(function(a,b){return a+b;},0)/arr.length : 0; }
+  function progress(w){ return w > 0 ? Math.round((w + (w >= 100 ? 5 : 2.5)) * 2) / 2 : 0; }
+
+  function formatEx(name, sets, reps, weight, ladder, note){
+    var w = weight > 0 ? ' '+weight : '';
+    var s = ladder ? ladder : sets+'x'+reps;
+    return name+' '+s+(w?w+'lbs':'')+(note?' '+note:'');
+  }
+
+  function pickFromHistory(muscleList, exclude){
+    exclude = exclude || [];
+    var matches = Object.keys(exHistory).filter(function(k){
+      if(exclude.indexOf(k)!==-1) return false;
+      return getMuscles(exHistory[k].name).some(function(m){ return muscleList.indexOf(m)!==-1; });
+    });
+    // sort by most frequently done
+    matches.sort(function(a,b){ return exHistory[b].count - exHistory[a].count; });
+    return matches;
+  }
+
+  function buildExLine(key, overrideSets, overrideReps){
+    var h = exHistory[key];
+    var lastW = getLast(h.weights);
+    var newW = progress(lastW);
+    var sets = overrideSets || Math.round(getAvg(h.sets)) || 4;
+    var reps = overrideReps || Math.round(getAvg(h.reps)) || 8;
+    // preserve ladder format for pull-ups
+    if(key.indexOf('pull-up')!==-1 || key.indexOf('pull up')!==-1 || key.indexOf('pullup')!==-1){
+      return h.name+' 10,8,6,6,6';
+    }
+    return formatEx(h.name, sets, reps, newW);
+  }
+
+  // ── ATHLETIC MOVEMENT ─────────────────────────────────
+  if(isAthletic){
+    var selectedSports = [];
+    document.querySelectorAll('.sport-chip.active').forEach(function(s){ selectedSports.push(s.dataset.sport); });
+    if(!selectedSports.length) selectedSports = ['Lacrosse','Basketball','Tennis','Golf'];
+
+    var explosive = ['Box jumps 4x5','Broad jumps 4x4','Jump squats 4x6','Depth drops 3x5','Plyo push-ups 3x8'];
+    var rotational = ['Landmine rotations 3x10e','Cable woodchop 3x12e','Med ball rotational throw 4x8e','Cable rotation 3x12e','Landmine press 3x8e 45lbs'];
+    var lateral = ['Lateral bounds 3x8e','Lateral shuffle 4x10yds','Lateral band walk 3x15e','Skater jumps 3x10e'];
+    var mobility = ['Hip 90/90 stretch 3x45sec','Single leg RDL 3x8e','Hip flexor lunge stretch 3x30sec','Band clamshells 3x15e'];
+    var carries = ['Farmers carry 3x40yds','Single arm carry 3x30ydse','Suitcase carry 3x30ydse'];
+    var coreAthletic = ['Pallof press 3x12e','Dead bug 3x10e','Ab wheel 3x10','Hollow hold 3x30sec','Cable woodchop 3x12e'];
+    var decel = ['Deceleration lunge 3x6e','Reactive step drill 3x8e','T-drill 4x1'];
+
+    var sportExtras = [];
+    if(selectedSports.indexOf('Lacrosse')!==-1||selectedSports.indexOf('Tennis')!==-1){
+      sportExtras.push('Med ball rotational throw 4x8e');
+      sportExtras.push('Landmine rotations 3x10e');
+    }
+    if(selectedSports.indexOf('Basketball')!==-1){
+      sportExtras.push('Box jumps 4x5');
+      sportExtras.push('Lateral bounds 3x8e');
+    }
+    if(selectedSports.indexOf('Golf')!==-1){
+      sportExtras.push('Cable rotation 3x12e');
+      sportExtras.push('Hip 90/90 stretch 3x45sec');
+    }
+
+    function pickUnique(arr, used){
+      var avail = arr.filter(function(x){ return used.indexOf(x)===-1; });
+      if(!avail.length) return null;
+      var chosen = avail[Math.floor(Math.random()*avail.length)];
+      used.push(chosen); return chosen;
+    }
+
+    var used = [];
+    var lines = [today];
+    sportExtras.slice(0,2).forEach(function(e){ if(used.indexOf(e)===-1){ lines.push(e); used.push(e); } });
+    var pools = [explosive, lateral, rotational, carries, coreAthletic, mobility, decel];
+    var targetLen = hasMixed ? 4 : 8;
+    pools.forEach(function(pool){
+      if(lines.length <= targetLen){ var e=pickUnique(pool,used); if(e) lines.push(e); }
+    });
+
+    // if mixed with other types, append strength exercises after athletic block
+    if(hasMixed){
+      lines.push('');
+      var allMuscles2 = [];
+      otherTypes.forEach(function(t){ getMusclesForType(t).forEach(function(m){ if(allMuscles2.indexOf(m)===-1) allMuscles2.push(m); }); });
+      var strengthMatches = pickFromHistory(allMuscles2, []);
+      strengthMatches.slice(0,4).forEach(function(k){ lines.push(buildExLine(k)); });
+    }
+
+    return lines.join('\n');
+  }
+
+  // ── STANDARD / MULTI WORKOUT ──────────────────────────
+  var allMuscles = [];
+  otherTypes.forEach(function(t){ getMusclesForType(t).forEach(function(m){ if(allMuscles.indexOf(m)===-1) allMuscles.push(m); }); });
+
+  var used = [];
+  var lines = [today];
+
+  // Fallback exercises if no history exists
+  var FALLBACKS = {
+    chest: [['Bench Press',4,8,135],['DB Chest Press',4,8,50],['Cable Fly',4,10,30],['Push-ups',4,15,0]],
+    shoulders: [['Overhead Press',4,8,95],['DB Lateral Raise',4,12,20],['DB Front Raise',4,10,20],['Face Pulls',4,12,50]],
+    triceps: [['Tricep Pushdown',4,12,50],['Skull Crushers',4,10,65],['Overhead Tricep Extension',3,12,40]],
+    biceps: [['Barbell Curl',4,10,65],['DB Hammer Curl',4,10,30],['Cable Curl',4,12,40]],
+    lats: [['Pull-ups 10,8,6,6,6','','',''],['Lat Pulldown',4,10,120],['DB Row',4,8,55]],
+    traps: [['BB Shrug',4,10,135],['DB Shrug',4,10,60],['Face Pulls',4,12,50]],
+    quads: [['BB Back Squat',4,6,135],['Leg Press',4,10,180],['DB Goblet Squat',4,12,50]],
+    hamstrings: [['Romanian Deadlift',4,8,135],['Leg Curl',4,10,100],['Hamstring Extension',4,10,100]],
+    glutes: [['Hip Thrust',4,10,135],['BB Reverse Lunge',4,6,75],['Cable Pull Through',3,12,50]],
+    calves: [['Calf Raise',4,15,0],['Single Leg Calf Raise',3,12,0]],
+    abs: [['Cable Crunch',4,12,70],['Plank 3x45sec','','',''],['Ab Wheel',3,10,0]],
+    forearms: [['Hammer Curl',4,10,30],['Wrist Curl',3,15,20]]
+  };
+
+  function getFallback(muscle){
+    var opts = FALLBACKS[muscle]||[];
+    return opts[Math.floor(Math.random()*opts.length)];
+  }
+
+  // Get history-based exercises for target muscles
+  var histMatches = pickFromHistory(allMuscles, []);
+
+  // For multi-select, build superset pairs
+  if(isMulti){
+    var group1Muscles = getMusclesForType(otherTypes[0]);
+    var group2Muscles = getMusclesForType(otherTypes[1]||otherTypes[0]);
+    var g1 = pickFromHistory(group1Muscles, []);
+    var g2 = pickFromHistory(group2Muscles, []);
+    var pairs = Math.min(4, Math.max(g1.length, g2.length, 3));
+
+    for(var i=0;i<pairs;i++){
+      var a = g1[i] ? buildExLine(g1[i]) : null;
+      var b = g2[i] ? buildExLine(g2[i]) : null;
+      if(!a && group1Muscles[0]){ var fb=getFallback(group1Muscles[0]); if(fb) a=fb[0]+(fb[1]?' '+fb[1]+'x'+fb[2]:'')+(fb[3]?' '+fb[3]+'lbs':''); }
+      if(!b && group2Muscles[0]){ var fb2=getFallback(group2Muscles[0]); if(fb2) b=fb2[0]+(fb2[1]?' '+fb2[1]+'x'+fb2[2]:'')+(fb2[3]?' '+fb2[3]+'lbs':''); }
+      if(a) lines.push(a);
+      if(b && b!==a) lines.push(b);
+    }
+  } else {
+    // Single type — pick best exercises from history
+    var target = histMatches.slice(0, 7);
+
+    // shuffle slightly for variety — don't always do the same order
+    for(var j=target.length-1;j>0;j--){
+      var rj=Math.floor(Math.random()*(j+1));
+      var tmp=target[j]; target[j]=target[rj]; target[rj]=tmp;
+    }
+
+    // always lead with compound movements (multi-muscle)
+    target.sort(function(a,b){
+      return getMuscles(exHistory[b].name).length - getMuscles(exHistory[a].name).length;
+    });
+
+    target.slice(0,7).forEach(function(k){
+      lines.push(buildExLine(k));
+      used.push(k);
+    });
+
+    // fill with fallbacks if not enough history
+    if(lines.length < 6){
+      allMuscles.forEach(function(m){
+        if(lines.length >= 8) return;
+        var fb = getFallback(m);
+        if(fb){
+          var line = fb[0]+(fb[1]?' '+fb[1]+'x'+fb[2]:'')+(fb[3]?' '+fb[3]+'lbs':'');
+          if(lines.indexOf(line)===-1) lines.push(line);
+        }
+      });
+    }
+  }
+
+  // warnings note at bottom
+  var warnings = get48hrWarnings(allMuscles);
+  if(warnings.length){
+    lines.push('');
+    lines.push('// Note: '+warnings.map(function(w){return w.muscle;}).join(', ')+' trained within 48hrs — keep intensity moderate');
+  }
+
+  return lines.join('\n');
 }
 
 // ── BODY MAP ──────────────────────────────────────────────
