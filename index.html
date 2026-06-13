@@ -86,6 +86,21 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter'
 .form-input:focus{border-color:var(--accent);}
 .form-input::placeholder{color:var(--muted);}
 textarea.form-input{resize:none;line-height:1.7;min-height:200px;}
+.input-row{display:flex;align-items:center;background:var(--card2);border:1.5px solid var(--border);border-radius:14px;overflow:hidden;transition:border-color 0.15s;}
+.input-row:focus-within{border-color:var(--accent);}
+.input-row .input-prefix{padding:0 14px;font-size:15px;color:var(--muted);display:flex;align-items:center;}
+.input-row .form-input{border:none;background:transparent;padding:13px 14px 13px 0;}
+
+/* WEIGHT CHART */
+.weight-chart{height:90px;display:flex;align-items:flex-end;gap:5px;margin-top:4px;}
+.weight-bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end;}
+.weight-bar{width:100%;border-radius:4px 4px 0 0;min-height:4px;background:linear-gradient(to top,var(--accent),var(--accent2));}
+.weight-lbl{font-size:9px;color:var(--muted);}
+.weight-val{font-size:9px;color:var(--text);font-weight:700;}
+.weight-stats-row{display:flex;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
+.weight-stat{text-align:center;flex:1;}
+.weight-stat-val{font-size:16px;font-weight:800;}
+.weight-stat-lbl{font-size:10px;color:var(--muted);margin-top:2px;}
 
 /* BUTTONS */
 .btn{display:flex;align-items:center;justify-content:center;gap:8px;border:none;border-radius:16px;padding:15px;font-family:'Inter',sans-serif;font-size:15px;font-weight:700;cursor:pointer;transition:all 0.15s;width:100%;margin-bottom:10px;}
@@ -191,6 +206,19 @@ textarea.form-input{resize:none;line-height:1.7;min-height:200px;}
       <div class="stat-card"><div class="stat-val" id="hTotal" style="color:var(--accent2)">0</div><div class="stat-lbl">Workouts</div></div>
       <div class="stat-card"><div class="stat-val" id="hPRs" style="color:var(--yellow)">0</div><div class="stat-lbl">PRs</div></div>
     </div>
+
+    <div class="sec-lbl">Body Weight</div>
+    <div class="card">
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
+        <div class="input-row" style="flex:1">
+          <span class="input-prefix">⚖️</span>
+          <input class="form-input" type="number" id="weightInput" placeholder="e.g. 178.5" style="border:none" step="0.1"/>
+        </div>
+        <button class="btn btn-primary" style="width:auto;margin-bottom:0;padding:13px 20px" id="logWeightBtn">Log</button>
+      </div>
+      <div id="weightChart"></div>
+    </div>
+
     <div class="sec-lbl">Recent</div>
     <div id="recentList"></div>
   </div>
@@ -365,13 +393,18 @@ var firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 var db = firebase.firestore();
 var DOC_REF = db.collection('djd').doc('workouts');
+var WEIGHT_DOC_REF = db.collection('djd').doc('bodyweight');
 
 // ── STORAGE ──────────────────────────────────────────────
 var LOCAL_KEY = 'djd_workouts_v2';
+var WEIGHT_LOCAL_KEY = 'djd_bodyweight_v1';
 function loadLocal(){ try{ return JSON.parse(localStorage.getItem(LOCAL_KEY)||'[]'); }catch(e){ return []; } }
 function saveLocal(w){ try{ localStorage.setItem(LOCAL_KEY, JSON.stringify(w)); }catch(e){} }
+function loadWeightLocal(){ try{ return JSON.parse(localStorage.getItem(WEIGHT_LOCAL_KEY)||'[]'); }catch(e){ return []; } }
+function saveWeightLocal(w){ try{ localStorage.setItem(WEIGHT_LOCAL_KEY, JSON.stringify(w)); }catch(e){} }
 
 var workouts = loadLocal(); // show cached data immediately while cloud loads
+var bodyweights = loadWeightLocal(); // [{date:'2026-06-13', weight:178.5}, ...]
 
 function save(w){
   saveLocal(w);
@@ -380,20 +413,41 @@ function save(w){
   });
 }
 
+function saveWeights(w){
+  saveWeightLocal(w);
+  WEIGHT_DOC_REF.set({ data: JSON.stringify(w), updated: Date.now() }).catch(function(err){
+    console.error('Cloud weight save failed:', err);
+  });
+}
+
 function loadFromCloud(callback){
+  var pending = 2;
+  function done(){ pending--; if(pending===0) callback(); }
+
   DOC_REF.get().then(function(doc){
     if(doc.exists && doc.data().data){
-      var cloudData = JSON.parse(doc.data().data);
-      workouts = cloudData;
+      workouts = JSON.parse(doc.data().data);
       saveLocal(workouts);
     } else if(workouts.length > 0){
-      // first run — push local cache to cloud
       DOC_REF.set({ data: JSON.stringify(workouts), updated: Date.now() });
     }
-    callback();
+    done();
   }).catch(function(err){
     console.error('Cloud load failed, using local cache:', err);
-    callback();
+    done();
+  });
+
+  WEIGHT_DOC_REF.get().then(function(doc){
+    if(doc.exists && doc.data().data){
+      bodyweights = JSON.parse(doc.data().data);
+      saveWeightLocal(bodyweights);
+    } else if(bodyweights.length > 0){
+      WEIGHT_DOC_REF.set({ data: JSON.stringify(bodyweights), updated: Date.now() });
+    }
+    done();
+  }).catch(function(err){
+    console.error('Cloud weight load failed, using local cache:', err);
+    done();
   });
 }
 
@@ -735,6 +789,60 @@ function calcPRs(){
   return Object.keys(bests).length;
 }
 
+// ── BODY WEIGHT TRACKER ───────────────────────────────────
+function renderWeightChart(){
+  var container = document.getElementById('weightChart');
+  var sorted = bodyweights.slice().sort(function(a,b){return a.date>b.date?1:-1;});
+
+  if(!sorted.length){
+    container.innerHTML = '<div style="text-align:center;padding:16px;color:var(--muted);font-size:13px">No weigh-ins yet — log your weight weekly to see your trend.</div>';
+    return;
+  }
+
+  var recent = sorted.slice(-8);
+  var weights = recent.map(function(r){return r.weight;});
+  var minW = Math.min.apply(null, weights);
+  var maxW = Math.max.apply(null, weights);
+  var range = (maxW - minW) || 1;
+
+  var bars = recent.map(function(r){
+    var pct = (r.weight - minW) / range;
+    var h = Math.max(8, Math.round(8 + pct * 64));
+    var d = new Date(r.date+'T12:00:00');
+    return '<div class="weight-bar-col">'+
+      '<div class="weight-val">'+r.weight+'</div>'+
+      '<div class="weight-bar" style="height:'+h+'px"></div>'+
+      '<div class="weight-lbl">'+(d.getMonth()+1)+'/'+d.getDate()+'</div>'+
+      '</div>';
+  }).join('');
+
+  var current = sorted[sorted.length-1].weight;
+  var first = sorted[0].weight;
+  var change = Math.round((current-first)*10)/10;
+  var avgRecent = Math.round((weights.reduce(function(a,b){return a+b;},0)/weights.length)*10)/10;
+
+  container.innerHTML =
+    '<div class="weight-chart">'+bars+'</div>'+
+    '<div class="weight-stats-row">'+
+      '<div class="weight-stat"><div class="weight-stat-val" style="color:var(--accent2)">'+current+'</div><div class="weight-stat-lbl">Current</div></div>'+
+      '<div class="weight-stat"><div class="weight-stat-val" style="color:'+(change<0?'var(--green)':change>0?'var(--orange)':'var(--text)')+'">'+(change>0?'+':'')+change+'</div><div class="weight-stat-lbl">Total Change</div></div>'+
+      '<div class="weight-stat"><div class="weight-stat-val" style="color:var(--blue)">'+avgRecent+'</div><div class="weight-stat-lbl">Avg (recent)</div></div>'+
+    '</div>';
+}
+
+document.getElementById('logWeightBtn').addEventListener('click', function(){
+  var val = parseFloat(document.getElementById('weightInput').value);
+  if(!val || val <= 0){ toast('Enter a valid weight'); return; }
+  var today = new Date().toISOString().split('T')[0];
+  // remove existing entry for today if present, then add new
+  bodyweights = bodyweights.filter(function(b){ return b.date !== today; });
+  bodyweights.push({date: today, weight: val});
+  saveWeights(bodyweights);
+  document.getElementById('weightInput').value = '';
+  renderWeightChart();
+  toast('Weight logged: '+val+' lbs ⚖️');
+});
+
 function renderHome(){
   // 48hr warning
   var warnEl = document.getElementById('warnBanner');
@@ -760,6 +868,8 @@ function renderHome(){
   document.getElementById('hStreak').textContent=calcStreak()+'🔥';
   document.getElementById('hTotal').textContent=workouts.filter(function(w){return !w.rest;}).length;
   document.getElementById('hPRs').textContent=calcPRs();
+
+  renderWeightChart();
 
   var listEl=document.getElementById('recentList');
   var sorted=workouts.slice().sort(function(a,b){return a.date>b.date?-1:1;});
