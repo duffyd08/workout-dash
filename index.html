@@ -97,6 +97,10 @@ textarea.form-input{resize:none;line-height:1.7;min-height:200px;}
 .type-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;}
 .type-chip{background:var(--card2);border:1.5px solid var(--border);border-radius:20px;padding:8px 16px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border:none;font-family:'Inter',sans-serif;transition:all 0.15s;}
 .type-chip.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+.type-chip.athletic{border-color:rgba(52,211,153,0.3);color:var(--green);}
+.type-chip.athletic.active{background:linear-gradient(135deg,#059669,#34d399);border-color:var(--green);color:#000;}
+.sport-chip{background:var(--card2);border:1.5px solid var(--border);border-radius:20px;padding:7px 14px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;font-family:'Inter',sans-serif;transition:all 0.15s;}
+.sport-chip.active{background:rgba(52,211,153,0.15);color:var(--green);border-color:rgba(52,211,153,0.4);}
 
 /* AI OUTPUT */
 .ai-output{background:var(--card2);border:1.5px solid #3a3566;border-radius:16px;padding:16px;margin-bottom:12px;display:none;}
@@ -211,7 +215,7 @@ DB curl 4xF 30s burnout<br>
     <div class="sec-lbl">Generate Next Workout</div>
     <div id="genWarnBanner"></div>
     <div class="card">
-      <div class="form-label" style="margin-bottom:10px">What are you training today?</div>
+      <div class="form-label" style="margin-bottom:6px">What are you training today? <span style="color:var(--muted);font-weight:400;font-size:11px">Select one or more</span></div>
       <div class="type-chips" id="typeChips">
         <button class="type-chip" data-type="Push">Push 💪</button>
         <button class="type-chip" data-type="Pull">Pull 🏋️</button>
@@ -222,6 +226,16 @@ DB curl 4xF 30s burnout<br>
         <button class="type-chip" data-type="Arms">Arms 💪</button>
         <button class="type-chip" data-type="Full Body">Full Body ⚡</button>
         <button class="type-chip" data-type="Cardio">Cardio 🏃</button>
+        <button class="type-chip athletic" data-type="Athletic Movement">Athletic Movement 🏃‍♂️⚡</button>
+      </div>
+      <div id="athleticSportPicker" style="display:none;margin-bottom:14px">
+        <div class="form-label" style="margin-bottom:8px">SPORT FOCUS <span style="color:var(--muted);font-weight:400;font-size:11px">(select all that apply)</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <button class="sport-chip active" data-sport="Lacrosse">🥍 Lacrosse</button>
+          <button class="sport-chip active" data-sport="Basketball">🏀 Basketball</button>
+          <button class="sport-chip active" data-sport="Tennis">🎾 Tennis</button>
+          <button class="sport-chip active" data-sport="Golf">⛳ Golf</button>
+        </div>
       </div>
       <div class="form-field">
         <div class="form-label">ANY EXTRA NOTES FOR THE AI</div>
@@ -752,13 +766,45 @@ function showDetail(w){
 }
 
 // ── GENERATE ──────────────────────────────────────────────
-var selectedType = '';
+var selectedTypes = [];
 document.querySelectorAll('.type-chip').forEach(function(chip){
   chip.addEventListener('click',function(){
-    document.querySelectorAll('.type-chip').forEach(function(c){c.classList.remove('active');});
-    chip.classList.add('active');
-    selectedType = chip.dataset.type;
+    var type = chip.dataset.type;
+    if(type === 'Athletic Movement'){
+      // Athletic movement is exclusive
+      var isActive = chip.classList.contains('active');
+      document.querySelectorAll('.type-chip').forEach(function(c){ c.classList.remove('active'); });
+      selectedTypes = [];
+      if(!isActive){
+        chip.classList.add('active');
+        selectedTypes = ['Athletic Movement'];
+        document.getElementById('athleticSportPicker').style.display = 'block';
+      } else {
+        document.getElementById('athleticSportPicker').style.display = 'none';
+      }
+    } else {
+      // Remove athletic if selecting regular
+      var athChip = document.querySelector('.type-chip.athletic');
+      if(athChip) athChip.classList.remove('active');
+      document.getElementById('athleticSportPicker').style.display = 'none';
+      selectedTypes = selectedTypes.filter(function(t){ return t !== 'Athletic Movement'; });
+
+      if(chip.classList.contains('active')){
+        chip.classList.remove('active');
+        selectedTypes = selectedTypes.filter(function(t){ return t !== type; });
+      } else {
+        chip.classList.add('active');
+        if(selectedTypes.indexOf(type) === -1) selectedTypes.push(type);
+      }
+    }
     renderGenWarning();
+  });
+});
+
+// Sport chips multi-select
+document.querySelectorAll('.sport-chip').forEach(function(chip){
+  chip.addEventListener('click', function(){
+    chip.classList.toggle('active');
   });
 });
 
@@ -771,30 +817,34 @@ function getMusclesForType(type){
     'Chest':['chest','triceps'],
     'Back':['lats','traps','biceps'],
     'Arms':['biceps','triceps'],
-    'Full Body':['chest','lats','quads','shoulders'],
-    'Cardio':[]
+    'Full Body':['chest','lats','quads','shoulders','hamstrings'],
+    'Cardio':[],
+    'Athletic Movement':['quads','hamstrings','glutes','calves','shoulders','abs']
   };
   return map[type]||[];
 }
 
 function renderGenWarning(){
-  if(!selectedType) return;
-  var muscles = getMusclesForType(selectedType);
-  var warnings = get48hrWarnings(muscles);
+  if(!selectedTypes.length) return;
+  var allMuscles = [];
+  selectedTypes.forEach(function(t){
+    getMusclesForType(t).forEach(function(m){ if(allMuscles.indexOf(m)===-1) allMuscles.push(m); });
+  });
+  var warnings = get48hrWarnings(allMuscles);
   var el = document.getElementById('genWarnBanner');
   if(warnings.length > 0){
-    el.innerHTML = '<div class="warn-banner"><span class="warn-icon">⚠️</span><div class="warn-text"><b>Heads up:</b> You trained '+warnings.map(function(w){return w.muscle;}).join(', ')+' within the last 48 hours. Consider a different muscle group or an easier session today.</div></div>';
+    el.innerHTML = '<div class="warn-banner"><span class="warn-icon">⚠️</span><div class="warn-text"><b>Heads up:</b> You trained '+warnings.map(function(w){return w.muscle;}).join(', ')+' within the last 48 hours. Consider a different muscle group or keep volume moderate.</div></div>';
   } else {
     el.innerHTML = '';
   }
 }
 
 document.getElementById('genBtn').addEventListener('click', function(){
-  if(!selectedType){ toast('Pick a workout type first'); return; }
-  generateWorkout(selectedType);
+  if(!selectedTypes.length){ toast('Pick a workout type first'); return; }
+  generateWorkout(selectedTypes);
 });
 
-function generateWorkout(type){
+function generateWorkout(types){
   var outputEl = document.getElementById('aiOutput');
   var textEl = document.getElementById('aiText');
   var copyWrap = document.getElementById('genCopyWrap');
@@ -803,7 +853,17 @@ function generateWorkout(type){
   copyWrap.style.display = 'none';
   textEl.innerHTML = '<div class="ai-loading"><span class="spinner">⚙️</span>Building your workout...</div>';
 
-  // Build context from workout history
+  var isAthletic = types.indexOf('Athletic Movement') !== -1;
+  var isMulti = types.length > 1 && !isAthletic;
+
+  // Get selected sports for athletic day
+  var selectedSports = [];
+  if(isAthletic){
+    document.querySelectorAll('.sport-chip.active').forEach(function(s){ selectedSports.push(s.dataset.sport); });
+    if(!selectedSports.length) selectedSports = ['Lacrosse','Basketball','Tennis','Golf'];
+  }
+
+  // Build exercise history context
   var exHistory = {};
   workouts.filter(function(w){return !w.rest&&!w.cardio;}).forEach(function(w){
     w.exercises.forEach(function(e){
@@ -812,14 +872,15 @@ function generateWorkout(type){
       if(e.weight>0) exHistory[k].weights.push(e.weight);
       if(e.sets>0) exHistory[k].sets.push(e.sets);
       if(e.reps>0) exHistory[k].reps.push(e.reps);
-      if(e.date>exHistory[k].lastDate) exHistory[k].lastDate=w.date;
+      if(w.date>exHistory[k].lastDate) exHistory[k].lastDate=w.date;
     });
   });
 
+  var allTargetMuscles = [];
+  types.forEach(function(t){ getMusclesForType(t).forEach(function(m){ if(allTargetMuscles.indexOf(m)===-1) allTargetMuscles.push(m); }); });
+
   var typeExercises = Object.keys(exHistory).filter(function(k){
-    return getMuscles(exHistory[k].name).some(function(m){
-      return getMusclesForType(type).indexOf(m)!==-1;
-    });
+    return getMuscles(exHistory[k].name).some(function(m){ return allTargetMuscles.indexOf(m)!==-1; });
   });
 
   var historyContext = typeExercises.slice(0,20).map(function(k){
@@ -828,59 +889,84 @@ function generateWorkout(type){
     var lastW = h.weights.length ? h.weights[h.weights.length-1] : 0;
     var avgS = h.sets.length ? Math.round(h.sets.reduce(function(a,b){return a+b;},0)/h.sets.length) : 4;
     var avgR = h.reps.length ? Math.round(h.reps.reduce(function(a,b){return a+b;},0)/h.reps.length) : 8;
-    return h.name+': last weight='+lastW+'lbs, avg='+avgW+'lbs, typically '+avgS+'x'+avgR;
+    return h.name+': last='+lastW+'lbs, avg='+avgW+'lbs, typical='+avgS+'x'+avgR;
   }).join('\n');
 
-  var warnings = get48hrWarnings(getMusclesForType(type));
-  var warnContext = warnings.length ? 'NOTE: User trained '+warnings.map(function(w){return w.muscle;}).join(', ')+' within 48hrs - keep volume moderate.' : '';
+  var warnings = get48hrWarnings(allTargetMuscles);
+  var warnCtx = warnings.length ? 'NOTE: Trained '+warnings.map(function(w){return w.muscle;}).join(', ')+' within 48hrs — keep volume moderate.\n' : '';
   var extraNotes = document.getElementById('genNotes').value.trim();
   var today = new Date().toLocaleDateString('en-US',{month:'numeric',day:'numeric'});
 
-  var prompt = 'You are a personal trainer generating a '+type+' workout for the user DJD.\n\n'+
-    'RULES:\n'+
-    '1. Use exercises from their history below where possible\n'+
-    '2. Output EXACTLY in their logging format (see example)\n'+
-    '3. Progress weights slightly from their last session (add 2.5-5lbs where appropriate)\n'+
-    '4. Include 5-8 exercises, 4 sets each typically\n'+
-    '5. Output the date first, then exercises, nothing else\n'+
-    (warnContext?'6. '+warnContext+'\n':'')+
-    '\nEXAMPLE FORMAT:\n'+
-    today+'\n'+
-    'Cable face pulls 4x12 62.5\n'+
-    'SA cable rows 4x8 65\n'+
-    'Pull-up ladder 10,8,6,6,6\n'+
-    'DB chest supported row 4x6 57.5\n'+
-    '\nUSER EXERCISE HISTORY:\n'+historyContext+
-    (extraNotes?'\n\nUSER NOTES: '+extraNotes:'')+
-    '\n\nGenerate the '+type+' workout now. Output ONLY the workout in the exact format shown. No commentary, no explanation.';
+  var prompt = '';
+
+  if(isAthletic){
+    prompt = 'You are an athletic performance trainer generating an Athletic Movement workout for DJD.\n\n'+
+      'SPORT FOCUS: '+selectedSports.join(', ')+'\n\n'+
+      'ATHLETIC MOVEMENT DAY FOCUSES ON:\n'+
+      '- Explosive power: box jumps, broad jumps, medicine ball throws, jump squats\n'+
+      '- Rotational power: landmine rotations, cable rotations, med ball rotational throws (key for lacrosse/tennis/golf)\n'+
+      '- Lateral speed & agility: lateral bounds, shuffle patterns, lateral band walks, 5-10-5 drill descriptions\n'+
+      '- Hip mobility & stability: hip 90/90, hip flexor stretches, single leg work, band clamshells\n'+
+      '- Deceleration & change of direction: deceleration lunges, reactive step drills\n'+
+      '- Carry-over exercises: farmers carries, single arm carries, pallof press, anti-rotation work\n'+
+      '- Core explosiveness: ab wheel, cable woodchops, hollow holds, dead bugs\n\n'+
+      'RULES:\n'+
+      '1. Output 6-8 movements focused on athleticism not pure strength\n'+
+      '2. Include sets/reps in the same format as example\n'+
+      '3. Mix explosive, mobility, and strength-based athletic movements\n'+
+      '4. No heavy barbell work — this is a movement quality day\n'+
+      (warnCtx?'5. '+warnCtx:'')+
+      '\nEXAMPLE FORMAT:\n'+
+      today+'\n'+
+      'Box jumps 4x5\n'+
+      'Landmine rotations 3x10e\n'+
+      'Lateral bounds 3x8e\n'+
+      'Pallof press 3x12e\n'+
+      'Single leg RDL 3x8e\n'+
+      'Cable woodchop 3x12e\n'+
+      'Farmers carry 3x40yds\n\n'+
+      (extraNotes?'USER NOTES: '+extraNotes+'\n\n':'')+
+      'Generate the Athletic Movement workout now. Output ONLY the workout in exact format. No commentary.';
+  } else {
+    var typeLabel = types.join(' + ');
+    var supersetNote = isMulti ? 'Structure as supersets — pair exercises from different muscle groups (e.g. A1/A2, B1/B2 format in the notes, but keep the logging format clean).\n' : '';
+    prompt = 'You are a personal trainer generating a '+typeLabel+' workout for DJD.\n\n'+
+      'RULES:\n'+
+      '1. Use exercises from their history where possible\n'+
+      '2. Output EXACTLY in their logging format\n'+
+      '3. Progress weights slightly from last session (add 2.5-5lbs where appropriate)\n'+
+      '4. Include 6-8 exercises total\n'+
+      (isMulti?'5. '+supersetNote:'5. 4 sets per exercise typically\n')+
+      (warnCtx?'6. '+warnCtx:'')+
+      '\nEXAMPLE FORMAT:\n'+
+      today+'\n'+
+      'Cable face pulls 4x12 62.5\n'+
+      'SA cable rows 4x8 65\n'+
+      'Pull-up ladder 10,8,6,6,6\n'+
+      'DB chest supported row 4x6 57.5\n\n'+
+      'USER EXERCISE HISTORY:\n'+historyContext+
+      (extraNotes?'\n\nUSER NOTES: '+extraNotes:'')+
+      '\n\nGenerate the '+typeLabel+' workout now. Output ONLY the workout in exact format. No commentary.';
+  }
 
   fetch('https://api.anthropic.com/v1/messages',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      model:'claude-sonnet-4-6',
-      max_tokens:1000,
-      messages:[{role:'user',content:prompt}]
-    })
+    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages:[{role:'user',content:prompt}]})
   }).then(function(r){return r.json();}).then(function(data){
     var txt = data.content && data.content[0] ? data.content[0].text : 'Could not generate workout. Try again.';
     textEl.textContent = txt;
     copyWrap.style.display = 'flex';
     copyWrap.style.flexDirection = 'column';
-
     document.getElementById('genCopyBtn').onclick = function(){
-      navigator.clipboard.writeText(txt).then(function(){ toast('Copied to clipboard! 📋'); });
+      navigator.clipboard.writeText(txt).then(function(){ toast('Copied! 📋'); });
     };
     document.getElementById('genImportBtn').onclick = function(){
       var parsed = parseLog(txt);
       if(parsed.length>0){
-        parsed.forEach(function(w){ workouts.push(w); });
-        save(workouts);
-        toast('Workout imported! 💪');
-        renderHome();
-      } else {
-        toast('Could not auto-import, try pasting it manually');
-      }
+        parsed.forEach(function(w){ workouts.push(w); }); save(workouts);
+        toast('Workout imported! 💪'); renderHome();
+      } else { toast('Could not auto-import — paste it manually'); }
     };
   }).catch(function(){
     textEl.textContent = 'Error connecting to AI. Check your connection and try again.';
