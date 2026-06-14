@@ -270,8 +270,8 @@ DB curl 4xF 30s burnout<br>
         </div>
       </div>
       <div class="form-field">
-        <div class="form-label">ANY EXTRA NOTES FOR THE AI</div>
-        <input class="form-input" type="text" id="genNotes" placeholder="e.g. feeling strong today, focus on volume"/>
+        <div class="form-label">GOAL OR NOTES <span style="color:var(--muted);font-weight:400;font-size:11px">e.g. "bigger arms", "leg definition", "strength focus"</span></div>
+        <input class="form-input" type="text" id="genNotes" placeholder="e.g. I want bigger more defined arms, or focus on strength today"/>
       </div>
       <button class="btn btn-primary" id="genBtn">✨ Generate Workout</button>
     </div>
@@ -1006,6 +1006,146 @@ function generateWorkout(types){
   }, 600);
 }
 
+// ── GOAL-BASED EXERCISE LIBRARY ───────────────────────────
+// Large bank of exercises by muscle group, used when user describes a specific goal
+var EXERCISE_LIBRARY = {
+  biceps: [
+    'Barbell Curl','EZ-Bar Curl','DB Hammer Curl','Incline DB Curl','Cable Curl',
+    'Preacher Curl','Concentration Curl','Spider Curl','Cross-body Hammer Curl','21s Bicep Curl'
+  ],
+  triceps: [
+    'Tricep Pushdown','Overhead Tricep Extension','Skull Crushers','DB Kickback',
+    'Close Grip Bench Press','Dips','Cable Overhead Extension','Tricep Rope Pushdown','JM Press'
+  ],
+  chest: [
+    'Bench Press','Incline DB Press','Decline Bench Press','Cable Fly','DB Chest Fly',
+    'Push-ups','Dips','Incline Cable Fly','Machine Chest Press','Pec Deck'
+  ],
+  shoulders: [
+    'Overhead Press','DB Lateral Raise','DB Front Raise','Arnold Press','Cable Lateral Raise',
+    'Face Pulls','Upright Row','Reverse Pec Deck','Landmine Press','Bus Drivers'
+  ],
+  lats: [
+    'Pull-ups','Lat Pulldown','DB Row','Cable Row','Barbell Row','T-Bar Row',
+    'Chest Supported Row','Single Arm Cable Row','Straight Arm Pulldown','Pull-up Ladder'
+  ],
+  traps: [
+    'BB Shrug','DB Shrug','Cable Shrug','Face Pulls','Farmers Carry Shrug'
+  ],
+  quads: [
+    'BB Back Squat','Leg Press','DB Goblet Squat','Bulgarian Split Squat','Leg Extension',
+    'Front Squat','Walking Lunge','Hack Squat','Step Ups'
+  ],
+  hamstrings: [
+    'Romanian Deadlift','Leg Curl','Good Morning','Stiff Leg Deadlift','Glute Ham Raise','Nordic Curl'
+  ],
+  glutes: [
+    'Hip Thrust','BB Reverse Lunge','Cable Pull Through','Glute Bridge','Cable Kickback','Sumo Deadlift'
+  ],
+  calves: [
+    'Calf Raise','Single Leg Calf Raise','Seated Calf Raise','Donkey Calf Raise'
+  ],
+  abs: [
+    'Cable Crunch','Plank','Ab Wheel','Hanging Leg Raise','Russian Twist','Bicycle Crunch','Dead Bug','V-ups'
+  ],
+  forearms: [
+    'Hammer Curl','Wrist Curl','Reverse Wrist Curl','Farmers Carry','Plate Pinch Hold'
+  ]
+};
+
+// Map common synonyms/body part phrases -> muscle keys
+var GOAL_MUSCLE_SYNONYMS = {
+  'arm':['biceps','triceps'], 'arms':['biceps','triceps'],
+  'bicep':['biceps'], 'biceps':['biceps'],
+  'tricep':['triceps'], 'triceps':['triceps'],
+  'chest':['chest'], 'pec':['chest'], 'pecs':['chest'],
+  'shoulder':['shoulders'], 'shoulders':['shoulders'], 'delt':['shoulders'], 'delts':['shoulders'],
+  'back':['lats','traps'], 'lat':['lats'], 'lats':['lats'],
+  'trap':['traps'], 'traps':['traps'],
+  'leg':['quads','hamstrings','glutes','calves'], 'legs':['quads','hamstrings','glutes','calves'],
+  'quad':['quads'], 'quads':['quads'], 'quadricep':['quads'],
+  'hamstring':['hamstrings'], 'hamstrings':['hamstrings'],
+  'glute':['glutes'], 'glutes':['glutes'], 'butt':['glutes'],
+  'calf':['calves'], 'calves':['calves'],
+  'core':['abs'], 'ab':['abs'], 'abs':['abs'], 'six pack':['abs'], 'stomach':['abs'],
+  'forearm':['forearms'], 'forearms':['forearms'], 'grip':['forearms']
+};
+
+// Goal keywords -> rep/set scheme (sets, reps, restNote)
+var GOAL_SCHEMES = {
+  hypertrophy: {sets:4, repsLo:8, repsHi:12, label:'hypertrophy (muscle growth)'},
+  definition:  {sets:3, repsLo:12, repsHi:15, label:'definition / toning (higher reps, shorter rest)'},
+  strength:    {sets:5, repsLo:3, repsHi:6, label:'strength (heavier weight, lower reps)'},
+  endurance:   {sets:3, repsLo:15, repsHi:20, label:'endurance (lighter weight, higher reps)'},
+  tone:        {sets:3, repsLo:12, repsHi:15, label:'definition / toning'}
+};
+
+function parseGoalNotes(notes){
+  var n = (notes||'').toLowerCase();
+  var result = { muscles: [], scheme: null };
+
+  // detect target muscles mentioned in the notes
+  Object.keys(GOAL_MUSCLE_SYNONYMS).forEach(function(word){
+    if(n.indexOf(word) !== -1){
+      GOAL_MUSCLE_SYNONYMS[word].forEach(function(m){
+        if(result.muscles.indexOf(m) === -1) result.muscles.push(m);
+      });
+    }
+  });
+
+  // detect goal/scheme keywords
+  if(/bigger|size|mass|grow|growth|hypertroph|bulk/i.test(n)) result.scheme = GOAL_SCHEMES.hypertrophy;
+  else if(/defin|toned?|tone|lean|cut|shred|sculpt/i.test(n)) result.scheme = GOAL_SCHEMES.definition;
+  else if(/strong|strength|powerlift|max|1rm|heavy/i.test(n)) result.scheme = GOAL_SCHEMES.strength;
+  else if(/endur|stamina|conditioning|high rep/i.test(n)) result.scheme = GOAL_SCHEMES.endurance;
+
+  // "bigger AND more defined" -> blend: favor hypertrophy rep range but note both
+  if(/bigger.*defin|defin.*bigger|bigger.*tone|tone.*bigger/i.test(n)){
+    result.scheme = {sets:4, repsLo:8, repsHi:12, label:'hypertrophy + definition blend (moderate-high reps, controlled tempo)'};
+  }
+
+  return result;
+}
+
+function pickFromLibrary(muscle, exclude, count){
+  var pool = EXERCISE_LIBRARY[muscle] || [];
+  var avail = pool.filter(function(ex){ return exclude.indexOf(ex.toLowerCase())===-1; });
+  // shuffle
+  for(var i=avail.length-1;i>0;i--){
+    var j=Math.floor(Math.random()*(i+1));
+    var tmp=avail[i]; avail[i]=avail[j]; avail[j]=tmp;
+  }
+  return avail.slice(0, count);
+}
+
+function buildGoalExLine(name, scheme, exHistory){
+  var key = name.toLowerCase();
+  var sets = scheme.sets;
+  var reps = scheme.repsLo + Math.floor(Math.random()*(scheme.repsHi-scheme.repsLo+1));
+  var weight = 0;
+
+  // if user has history with this exact exercise, base weight off their last weight
+  if(exHistory[key] && exHistory[key].weights.length){
+    var last = exHistory[key].weights[exHistory[key].weights.length-1];
+    // adjust weight estimate based on rep range vs their typical reps
+    weight = last;
+  } else {
+    // estimate a reasonable starting weight based on exercise type
+    var bodyweightExercises = ['push-ups','pull-ups','plank','dips','dead bug','v-ups','hanging leg raise','pull-up ladder'];
+    if(bodyweightExercises.indexOf(key)!==-1) weight = 0;
+    else weight = 0; // leave blank for user to fill in if no history
+  }
+
+  if(key==='pull-up ladder' || key==='pull-ups'){
+    return name+' 10,8,6,6,6';
+  }
+  if(key==='plank'){
+    return name+' '+sets+'x45sec';
+  }
+  var w = weight > 0 ? ' '+weight+'lbs' : '';
+  return name+' '+sets+'x'+reps+w;
+}
+
 function buildWorkout(types){
   var isAthletic = types.indexOf('Athletic Movement') !== -1;
   var otherTypes = types.filter(function(t){ return t !== 'Athletic Movement'; });
@@ -1060,6 +1200,45 @@ function buildWorkout(types){
       return h.name+' 10,8,6,6,6';
     }
     return formatEx(h.name, sets, reps, newW);
+  }
+
+  // ── GOAL-BASED GENERATION ──────────────────────────────
+  // If the user describes a specific goal (e.g. "bigger more defined arms"),
+  // build the workout from the broader exercise library targeting those muscles
+  // with rep/set ranges suited to that goal, instead of (or blended with) history.
+  var goalNotesRaw = document.getElementById('genNotes').value.trim();
+  var goal = parseGoalNotes(goalNotesRaw);
+
+  if(goal.muscles.length > 0 && !isAthletic){
+    var scheme = goal.scheme || GOAL_SCHEMES.hypertrophy; // default to hypertrophy if goal muscle given but no scheme keyword
+    var lines = [today];
+    var usedNames = [];
+
+    // distribute ~6-8 exercises across the target muscles
+    var perMuscle = Math.max(2, Math.floor(7 / goal.muscles.length));
+
+    goal.muscles.forEach(function(muscle){
+      var picks = pickFromLibrary(muscle, usedNames, perMuscle);
+      picks.forEach(function(ex){
+        usedNames.push(ex.toLowerCase());
+        lines.push(buildGoalExLine(ex, scheme, exHistory));
+      });
+    });
+
+    // trim to a reasonable count
+    if(lines.length > 9) lines = lines.slice(0,9);
+
+    // add a note about the training focus
+    lines.push('');
+    lines.push('// Goal: '+scheme.label+' — '+scheme.sets+' sets x '+scheme.repsLo+'-'+scheme.repsHi+' reps. Adjust weight to match the rep range (challenging on the last 1-2 reps).');
+
+    // 48hr warning
+    var warnings48 = get48hrWarnings(goal.muscles);
+    if(warnings48.length){
+      lines.push('// Note: '+warnings48.map(function(w){return w.muscle;}).join(', ')+' trained within 48hrs — consider lighter loads today');
+    }
+
+    return lines.join('\n');
   }
 
   // ── ATHLETIC MOVEMENT ─────────────────────────────────
